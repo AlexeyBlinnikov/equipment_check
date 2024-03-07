@@ -8,7 +8,7 @@ from aiogram.filters import Command
 
 router = Router()
 
-TOKEN = "6808569963:AAFRmrmLV5NL-b26eaErFMtjimFXwYAbX3o"
+TOKEN = "5524654123:AAHfHmtyG1-s1G0JtZFbQX7FInrgh9fo50g"
 
 
 bot = Bot(token = TOKEN) 

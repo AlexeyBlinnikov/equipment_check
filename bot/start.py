@@ -15,7 +15,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import pandas
 from datetime import date, timedelta
-from sqlite_db import sql_start, sql_add_command, sql_read_date1_today, sql_read, get_all_categories, sql_read_rowid, del_sql, update_sql_extend, sql_read_date2, sql_read_date2_today
+from sqlite_db import sql_start, sql_add_command, sql_read_date1_today, sql_read, get_all_categories, sql_read_rowid, del_sql, update_sql_extend, sql_read_date2, sql_read_date2_today, update_sql_pay, sql_read_date1_test
 from create_bot import bot, dp
 import sqlite3
 import math
@@ -35,6 +35,7 @@ class Form(StatesGroup):
 
 class Form1(StatesGroup):
     extend = State()
+    pay =State()
 
          #отмена ввода
 @dp.message(Command("cancel"))
@@ -47,9 +48,28 @@ async def cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.reply('Выход из машины состояний')
 
-# @dp.message(Command("test"))
-# async def send_test(message: types.Message):
-#     await bot.send_message(message.from_user.id, text = f"Привет")
+async def analize(message: types.Message):
+    date_today = datetime.now().date()
+    all_eq = sql_read()
+    take_today = sql_read_date1_today(date_today.strftime("%d.%m.%Y"))
+    return_today = sql_read_date2_today(date_today.strftime("%d.%m.%Y"))
+    count, count1, count2, count3 = 1, 1, 1, 1
+    all, res, t, r = "", "", "", ""
+    for i in all_eq:
+        if datetime.now() > (datetime.strptime(i[2], "%d.%m.%Y")):
+            all+=f"{count}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
+            count+=1
+    for i in all_eq:
+        if datetime.now() < (datetime.strptime(i[2], "%d.%m.%Y")):
+            res+=f"{count3}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
+            count3+=1
+    for i in take_today:
+        t+=f"{count1}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
+        count1+=1
+    for i in return_today:
+        r+=f"{count2}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
+        count2+=1
+    await bot.send_message(377590850, text = f"*Бронь*\n{res}\n*Должны вернуть*\n{r}\n*Должны взять*\n{t}\n*В Аренде*\n{all}", parse_mode= "Markdown")
 
 
 async def on_startup(_):
@@ -120,9 +140,17 @@ async def extend (message:types.Message, state: FSMContext):
     # вытащить дату2 из sql и прибавить к этой дате параметр data
     start_date = datetime.strptime(sql_read_date2(arr_extend[-1])[0], '%d.%m.%Y')
     end_date = datetime.strftime(start_date + timedelta(days=int(data["extend"])), '%d.%m.%Y')
-
     await update_sql_extend(end_date, arr_extend[-1])
-    await bot.send_message(message.from_user.id, text = f"Успешно продлили срок аренды на *{data['extend']}* суток", reply_markup=start_kb.as_markup(), parse_mode= "Markdown")
+    await state.set_state(Form1.pay)
+    await message.answer("Общая сумма, которую заплатил клиент:")
+
+
+@dp.message(Form1.pay)
+async def pay (message:types.Message, state: FSMContext): 
+    await state.update_data(pay=message.text)
+    data2 = await state.get_data()
+    await update_sql_pay(data2["pay"], arr_extend[-1])
+    await bot.send_message(message.from_user.id, text = f"Успешно продлили срок аренды", reply_markup=start_kb.as_markup())
     await state.clear()
 
 @dp.callback_query(F.data.startswith('category_swipe_'))
@@ -210,7 +238,8 @@ async def price (message:types.Message, state: FSMContext):
 
 # _______________________________Клавиатура______________________________________
 # Кнопки старта
-start_kb = ReplyKeyboardBuilder().row(KeyboardButton(text = "Взяли"), KeyboardButton(text = "Вернули")).row(KeyboardButton(text = "Бронь"), KeyboardButton(text = "Продлили"))
+start_kb = ReplyKeyboardBuilder().row(KeyboardButton(text = "Взяли"), KeyboardButton(text = "Вернули")).row(KeyboardButton(text = "Бронь"), KeyboardButton(text = "Продлили")).add(KeyboardButton(text = "Анализ"))
+start_kb.adjust(2,2, 1)
 # Инлайн кнопки
 take_reserv_kb_button = InlineKeyboardBuilder().add(InlineKeyboardButton(text = "Другое", callback_data='button_take_other')).add(InlineKeyboardButton(text = 'PS 5', callback_data='button_take_ps5')).add(InlineKeyboardButton(text ='Клининг', callback_data='select_cleaning')).add(InlineKeyboardButton(text = 'Go Pro', callback_data='button_take_gopro')).add(InlineKeyboardButton(text = 'Тепловизор', callback_data='button_take_teplovisor'))
 take_reserv_kb_button.adjust(1, 2)
@@ -231,7 +260,29 @@ async def reserv_kb(message: types.Message):
 async def extend_kb(message: types.Message):
     x = await category_swipe_fp(0, "extend")
     x.adjust(1, 1)
-    await bot.send_message(message.from_user.id, "Выбери категорию", reply_markup=x.as_markup())
+    await bot.send_message(message.from_user.id, "Выбери категорию", reply_markup=x.as_markup()) 
+async def analize(message: types.Message):
+    date_today = datetime.now().date()
+    all_eq = sql_read()
+    take_today = sql_read_date1_today(date_today.strftime("%d.%m.%Y"))
+    return_today = sql_read_date2_today(date_today.strftime("%d.%m.%Y"))
+    count, count1, count2, count3 = 1, 1, 1, 1
+    all, res, t, r = "", "", "", ""
+    for i in all_eq:
+        if datetime.now() > (datetime.strptime(i[2], "%d.%m.%Y")):
+            all+=f"{count}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
+            count+=1
+    for i in all_eq:
+        if datetime.now() < (datetime.strptime(i[2], "%d.%m.%Y")):
+            res+=f"{count3}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
+            count3+=1
+    for i in take_today:
+        t+=f"{count1}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
+        count1+=1
+    for i in return_today:
+        r+=f"{count2}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
+        count2+=1
+    await bot.send_message(message.from_user.id, text = f"*Бронь*\n{res}\n*Должны вернуть*\n{r}\n*Должны взять*\n{t}\n*В Аренде*\n{all}", parse_mode= "Markdown")
 
 
 
@@ -267,12 +318,12 @@ async def send_reminder():
     for i in return_today:
         r+=f"{count2}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
         count2+=1
-    await bot.send_message(377590850, text = f"*Сегодня в аренде*\n {all}\n\n*Должны вернуть*\n{r}\n*Должны взять*\n{t}", parse_mode= "Markdown")
+    await bot.send_message(377590850, text = f"*Аренда/Бронь*\n {all}\n\n*Должны вернуть*\n{r}\n*Должны взять*\n{t}", parse_mode= "Markdown")
 
 try:
     async def scheduler():
-            # aioschedule.every().day.at("07:00").do(send_reminder)
-            aioschedule.every(60).seconds.do(send_reminder)
+            aioschedule.every().day.at("08:00").do(send_reminder)
+            # aioschedule.every(60).seconds.do(send_reminder)
             # aioschedule.every(6).hours.do(send_admin_message_delqr)
             while True:
                 await aioschedule.run_pending()
@@ -288,6 +339,7 @@ def register_handlers_client(dp):
     dp.message.register(return_kb, F.text == 'Вернули')
     dp.message.register(reserv_kb, F.text == 'Бронь')
     dp.message.register(extend_kb, F.text == 'Продлили')
+    dp.message.register(analize, F.text == 'Анализ')
 
     dp.callback_query.register(send_welcome_query, F.data =='start_command')
     # разделение кнопок от КЛИНИНГА

@@ -34,6 +34,9 @@ def sql_read_date2(data):
 def sql_read_rowid():
     return cur.execute('SELECT ROWID, * FROM equipment').fetchall()
 
+def sql_read_date1_test(d):
+    return cur.execute('SELECT date1 FROM equipment WHERE ROWID ==?', (d,)).fetchone()
+
 # для календаря
 def dict_factory(cursor, row):
     save_dict = {}
@@ -49,6 +52,9 @@ def get_all_categories(**kwargs):
 #____________Обновляем_____________
 async def update_sql_extend(date2, rowid):
     cur.execute('UPDATE equipment SET date2 = ? WHERE ROWID ==?', (date2, rowid,))
+    base.commit()
+async def update_sql_pay(date2, rowid):
+    cur.execute('UPDATE equipment SET price = ? WHERE ROWID ==?', (date2, rowid,))
     base.commit()
 
 #____________Удаляем из бд_____________
