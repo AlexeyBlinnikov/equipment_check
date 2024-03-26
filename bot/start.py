@@ -1,4 +1,4 @@
-from operator import eq
+from operator import eq, ge
 from aiogram import types
 import asyncio
 import aioschedule
@@ -19,6 +19,7 @@ from sqlite_db import sql_start, sql_add_command, sql_read_date1_today, sql_read
 from create_bot import bot, dp
 import sqlite3
 import math
+from sheets import append_values, update_value, get_batch
 
 arr_equipment = []
 arr_action = []
@@ -48,29 +49,6 @@ async def cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.reply('Выход из машины состояний')
 
-async def analize(message: types.Message):
-    date_today = datetime.now().date()
-    all_eq = sql_read()
-    take_today = sql_read_date1_today(date_today.strftime("%d.%m.%Y"))
-    return_today = sql_read_date2_today(date_today.strftime("%d.%m.%Y"))
-    count, count1, count2, count3 = 1, 1, 1, 1
-    all, res, t, r = "", "", "", ""
-    for i in all_eq:
-        if datetime.now() > (datetime.strptime(i[2], "%d.%m.%Y")):
-            all+=f"{count}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
-            count+=1
-    for i in all_eq:
-        if datetime.now() < (datetime.strptime(i[2], "%d.%m.%Y")):
-            res+=f"{count3}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
-            count3+=1
-    for i in take_today:
-        t+=f"{count1}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
-        count1+=1
-    for i in return_today:
-        r+=f"{count2}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
-        count2+=1
-    await bot.send_message(377590850, text = f"*Бронь*\n{res}\n*Должны вернуть*\n{r}\n*Должны взять*\n{t}\n*В Аренде*\n{all}", parse_mode= "Markdown")
-
 
 async def on_startup(_):
     print('Бот вышел в онлайн!')
@@ -79,6 +57,8 @@ async def send_welcome(message: types.Message):
         await bot.send_message(message.from_user.id, "Выбери действие", reply_markup=start_kb.as_markup())
 async def send_welcome_query(call: types.CallbackQuery):
         await bot.send_message(call.from_user.id, "Выбери действие", reply_markup=start_kb.as_markup())
+
+
 
 
 # ___________Плавающие инлайн кнопки для Возврата и Продления___________
@@ -125,6 +105,7 @@ async def user_purchase_category_next_page(call: types.CallbackQuery, state: FSM
         await del_sql(row_id)
         await bot.send_message(call.from_user.id, f"*{name}* осуществил полный *возврат.*", reply_markup=start_kb.as_markup(), parse_mode= "Markdown")
     elif value2 == "extend":
+        arr_extend.append(name)
         arr_extend.append(row_id)
         await state.set_state(Form1.extend)
         await bot.send_message(call.from_user.id, f"Срок продления для клиента *{name}*:", parse_mode= "Markdown")
@@ -135,14 +116,18 @@ async def user_purchase_category_next_page(call: types.CallbackQuery, state: FSM
 
 @dp.message(Form1.extend)
 async def extend (message:types.Message, state: FSMContext):
-    await state.update_data(extend=message.text)
-    data = await state.get_data()
-    # вытащить дату2 из sql и прибавить к этой дате параметр data
-    start_date = datetime.strptime(sql_read_date2(arr_extend[-1])[0], '%d.%m.%Y')
-    end_date = datetime.strftime(start_date + timedelta(days=int(data["extend"])), '%d.%m.%Y')
-    await update_sql_extend(end_date, arr_extend[-1])
-    await state.set_state(Form1.pay)
-    await message.answer("Общая сумма, которую заплатил клиент:")
+    try:
+        await state.update_data(extend=message.text)
+        data = await state.get_data()
+        # вытащить дату2 из sql и прибавить к этой дате параметр data
+        start_date = datetime.strptime(sql_read_date2(arr_extend[-1])[0], '%d.%m.%Y')
+        end_date = datetime.strftime(start_date + timedelta(days=int(data["extend"])), '%d.%m.%Y')
+        await update_sql_extend(end_date, arr_extend[-1])
+        await state.set_state(Form1.pay)
+        await message.answer("Общая сумма, которую заплатил клиент:")
+    except:
+        await message.answer("Ошибка, необходимо число")
+        await state.clear()
 
 
 @dp.message(Form1.pay)
@@ -150,6 +135,7 @@ async def pay (message:types.Message, state: FSMContext):
     await state.update_data(pay=message.text)
     data2 = await state.get_data()
     await update_sql_pay(data2["pay"], arr_extend[-1])
+    append_values("B4:F4", arr_extend[-2], data2["pay"], "Продлили", "", "", f"продлил на {data2['extend']} суток")
     await bot.send_message(message.from_user.id, text = f"Успешно продлили срок аренды", reply_markup=start_kb.as_markup())
     await state.clear()
 
@@ -227,6 +213,7 @@ async def price (message:types.Message, state: FSMContext):
     await state.update_data(price=message.text)
     data = await state.get_data()
     await sql_add_command([arr_equipment[-1], data['name'], data['date1'], data['date2'], data['price']])
+    append_values("B4:F4", data["name"], data['price'], "Аренда/бронь", arr_equipment[-1], data['date1'], data['date2'])
     await state.clear()
     # date_time_obj1 = datetime.strptime(data['date1'], '%d.%m.%Y')
     # date_time_obj2 = datetime.strptime(data['date2'], '%d.%m.%Y')
@@ -238,7 +225,7 @@ async def price (message:types.Message, state: FSMContext):
 
 # _______________________________Клавиатура______________________________________
 # Кнопки старта
-start_kb = ReplyKeyboardBuilder().row(KeyboardButton(text = "Взяли"), KeyboardButton(text = "Вернули")).row(KeyboardButton(text = "Бронь"), KeyboardButton(text = "Продлили")).add(KeyboardButton(text = "Анализ"))
+start_kb = ReplyKeyboardBuilder().row(KeyboardButton(text = "Взяли"), KeyboardButton(text = "Вернули")).row(KeyboardButton(text = "Бронь"), KeyboardButton(text = "Продлили")).add(KeyboardButton(text = "Анализ")).add(KeyboardButton(text = "Посмотреть наличие"))
 start_kb.adjust(2,2, 1)
 # Инлайн кнопки
 take_reserv_kb_button = InlineKeyboardBuilder().add(InlineKeyboardButton(text = "Другое", callback_data='button_take_other')).add(InlineKeyboardButton(text = 'PS 5', callback_data='button_take_ps5')).add(InlineKeyboardButton(text ='Клининг', callback_data='select_cleaning')).add(InlineKeyboardButton(text = 'Go Pro', callback_data='button_take_gopro')).add(InlineKeyboardButton(text = 'Тепловизор', callback_data='button_take_teplovisor'))
@@ -262,39 +249,70 @@ async def extend_kb(message: types.Message):
     x.adjust(1, 1)
     await bot.send_message(message.from_user.id, "Выбери категорию", reply_markup=x.as_markup()) 
 async def analize(message: types.Message):
-    date_today = datetime.now().date()
-    all_eq = sql_read()
-    take_today = sql_read_date1_today(date_today.strftime("%d.%m.%Y"))
-    return_today = sql_read_date2_today(date_today.strftime("%d.%m.%Y"))
-    count, count1, count2, count3 = 1, 1, 1, 1
-    all, res, t, r = "", "", "", ""
-    for i in all_eq:
-        if datetime.now() > (datetime.strptime(i[2], "%d.%m.%Y")):
-            all+=f"{count}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
-            count+=1
-    for i in all_eq:
-        if datetime.now() < (datetime.strptime(i[2], "%d.%m.%Y")):
-            res+=f"{count3}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
-            count3+=1
-    for i in take_today:
-        t+=f"{count1}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
-        count1+=1
-    for i in return_today:
-        r+=f"{count2}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]}\n"
-        count2+=1
-    await bot.send_message(message.from_user.id, text = f"*Бронь*\n{res}\n*Должны вернуть*\n{r}\n*Должны взять*\n{t}\n*В Аренде*\n{all}", parse_mode= "Markdown")
+    try:
+        date_today = datetime.now().date()
+        all_eq = sql_read()
+        take_today = sql_read_date1_today(date_today.strftime("%d.%m.%Y"))
+        return_today = sql_read_date2_today(date_today.strftime("%d.%m.%Y"))
+        count, count1, count2, count3 = 1, 1, 1, 1
+        all, res, t, r = "", "", "", ""
+        for i in all_eq:
+            if datetime.now() > (datetime.strptime(i[2], "%d.%m.%Y")):
+                all+=f"{count}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]} 🕘: с {i[2]} по {i[3]}\n"
+                count+=1
+        for i in all_eq:
+            if datetime.now() < (datetime.strptime(i[2], "%d.%m.%Y")):
+                res+=f"{count3}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]} 🕘: с {i[2]} по {i[3]}\n"
+                count3+=1
+        for i in take_today:
+            t+=f"{count1}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]} 🕘: с {i[2]} по {i[3]}\n"
+            count1+=1
+        for i in return_today:
+            r+=f"{count2}: 🙎‍♂️: {i[1]} 🛠: {i[0]} 💵: {i[4]} 🕘: с {i[2]} по {i[3]}\n"
+            count2+=1
+        await bot.send_message(message.from_user.id, text = f"*Бронь*\n{res}\n*Должны вернуть*\n{r}\n*Должны взять*\n{t}\n*В аренде*\n{all}", parse_mode= "Markdown")
+    except:
+        await bot.send_message(message.from_user.id, text = f"Ошибка")
 
+async def see_free_eq(message: types.Message):
+    try:
+        await bot.send_message(message.from_user.id,
+            "Введи дату",
+            reply_markup=await SimpleCalendar(locale=await get_user_locale(message.from_user)).start_calendar())
+        # update_value("A1", "9334")
+        @dp.callback_query(SimpleCalendarCallback.filter())
+        async def process_simple_calendar(callback_query: types.CallbackQuery, callback_data: CallbackData):
+            calendar = SimpleCalendar(
+                locale=await get_user_locale(callback_query.from_user), show_alerts=True
+            )
+            calendar.set_dates_range(datetime(2022, 1, 1), datetime(2025, 12, 31))
+            selected, date = await calendar.process_selection(callback_query, callback_data)
+            if selected:
+                await callback_query.message.answer(
+                    f'Вы выбрали {date.strftime("%d/%m/%Y")}',
+                    reply_markup=start_kb.as_markup()
+                )
+                update_value("Учет свободного оборудования!B1", f'{date.strftime("%d/%m/%Y")}')
+                eq_today = get_batch("Учет свободного оборудования!A3:B50")
+                value = ""
+                for i in eq_today['valueRanges'][0]['values']:
+                    value+= f"{i}\n"
+                await message.answer(f"{value}")
+
+            await callback_query.answer()
+    except:
+        await message.answer("Ошибка, дату и отчет получить не удалось")
 
 
 # _____________Кнопка ВЗЯЛИ ПРИ НАЛИЧИИ РАЗДЕЛЕНИЙ_____________
 async def take_klining(callback_query: types.CallbackQuery):
-        await bot.send_message(callback_query.from_user.id, "Выбери оборудование", reply_markup = InlineKeyboardBuilder().add(InlineKeyboardButton(text = 'Puzzi', callback_data = 'button_take_puzzi')).as_markup())
+        await bot.send_message(callback_query.from_user.id, "Выбери оборудование", reply_markup = InlineKeyboardBuilder().add(InlineKeyboardButton(text = 'Puzzi', callback_data = 'button_take_puzzi')).add(InlineKeyboardButton(text = 'Пароочиститель', callback_data = 'button_take_SC4')).add(InlineKeyboardButton(text = 'Мойщик окон', callback_data = 'button_take_cleanbot')).as_markup())
         await callback_query.answer()
 
 # _____________Кнопка БРОНЬ ПРИ НАЛИЧИИ РАЗДЕЛЕНИЙ_____________
-async def reserv_klining(callback_query: types.CallbackQuery):
-        await bot.send_message(callback_query.from_user.id, "Выбери оборудование", reply_markup = InlineKeyboardBuilder().add(InlineKeyboardButton(text = 'Puzzi', callback_data = 'button_reserv_puzzi')).as_markup())
-        await callback_query.answer()
+# async def reserv_klining(callback_query: types.CallbackQuery):
+#         await bot.send_message(callback_query.from_user.id, "Выбери оборудование", reply_markup = InlineKeyboardBuilder().add(InlineKeyboardButton(text = 'Puzzi', callback_data = 'button_reserv_puzzi')).as_markup())
+#         await callback_query.answer()
 
 
 
@@ -340,10 +358,11 @@ def register_handlers_client(dp):
     dp.message.register(reserv_kb, F.text == 'Бронь')
     dp.message.register(extend_kb, F.text == 'Продлили')
     dp.message.register(analize, F.text == 'Анализ')
+    dp.message.register(see_free_eq, F.text == 'Посмотреть наличие')
 
     dp.callback_query.register(send_welcome_query, F.data =='start_command')
     # разделение кнопок от КЛИНИНГА
-    dp.callback_query.register(reserv_klining, F.data == "button_reserv_3")
+    # dp.callback_query.register(reserv_klining, F.data == "button_reserv_3")
     dp.callback_query.register(take_klining, F.data == "select_cleaning")
 
     # прямой выход к календарю
